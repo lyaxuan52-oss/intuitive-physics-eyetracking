@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# R
+.Rhistory
+.Rproj.user/
+*.Rproj
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Raw eye-tracking data (hosted on OSF, see README)
+data/raw/eye_tracking/*.edf
+data/raw/eye_tracking/*.EDF
+data/raw/eye_tracking/*.asc
+data/raw/eye_tracking/*.ASC
+
+# Model sampling outputs (large NetCDF files)
+*.nc
+analysis/*.nc
+
+# Temporary files
+*.tmp
+*.bak

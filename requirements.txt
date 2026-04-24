@@ -1,0 +1,32 @@
+# ============================================================
+# Python dependencies for analysis scripts
+# ============================================================
+
+# Data processing
+pandas>=2.0
+numpy>=1.24
+openpyxl>=3.1          # optional: Excel export in 01_preprocess_behavior.py
+
+# Visualization
+matplotlib>=3.7
+seaborn>=0.12
+
+# Bayesian computational modeling (scripts 07-09)
+pymc>=5.0
+arviz>=0.15
+
+# ============================================================
+# R dependencies (install in R console)
+# ============================================================
+# install.packages(c(
+#   "dplyr", "tidyr", "purrr", "ggplot2",
+#   "ez", "emmeans", "jsonlite", "zoo",
+#   "gridExtra", "gtable"
+# ))
+#
+# ============================================================
+# Experiment dependencies (see experiment/main_task/requirements.txt)
+# ============================================================
+# pymunk==6.6.0
+# psychopy==2023.2.3
+# pylink  (SR Research EyeLink SDK, not standard pip)
