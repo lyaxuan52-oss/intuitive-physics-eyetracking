@@ -21,7 +21,9 @@ arviz>=0.15
 # install.packages(c(
 #   "dplyr", "tidyr", "purrr", "ggplot2",
 #   "ez", "emmeans", "jsonlite", "zoo",
-#   "gridExtra", "gtable"
+#   "gridExtra", "gtable",
+#   # NEW: Independent rating analysis dependencies
+#   "dplyr", "ggplot2", "ez", "tidyr"
 # ))
 #
 # ============================================================

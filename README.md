@@ -26,6 +26,7 @@ intuitive-physics-eyetracking/
 │   │   ├── config.py             # Experiment parameters
 │   │   ├── stimulus_generator.py # Stimulus generation (offline)
 │   │   ├── experiment_runtime.py # Experiment runtime (online)
+│   │   ├── rating_experiment.py  # [NEW] Independent rating experiment (binary judgment task)
 │   │   ├── physics_utils.py      # Pymunk physics engine utilities
 │   │   ├── EyeLinkCoreGraphicsPsychoPy.py  # EyeLink integration
 │   │   └── requirements.txt      # Experiment-specific dependencies
@@ -45,16 +46,21 @@ intuitive-physics-eyetracking/
 │   ├── 07_model_fit_compare.py             # Bayesian model fitting & comparison
 │   ├── 08_coexist_model_analysis.py        # Detailed coexist model analysis
 │   ├── 09_coexist_plot_curves.py           # Coexist model visualization
-│   └── 10_sosa_blended_model.py            # Sosa blended algorithm for RT
+│   ├── 10_sosa_blended_model.py            # Sosa blended algorithm for RT
+│   └── independent_rating_analysis.R       # [NEW] Independent rating experiment analysis (R script)
 │
 ├── data/
 │   ├── raw/
 │   │   ├── behavior/             # Per-subject behavioral CSVs (N=44)
-│   │   └── eye_tracking/         # Raw EDF/ASC files (not in repo; see below)
+│   │   ├── eye_tracking/         # Raw EDF/ASC files (not in repo; see below)
+│   │   └── rating/               # [NEW] Independent rating experiment data (N=20)
+│   │       └── sub-{ID}/
+│   │           └── ratings.csv   # Binary judgment data
 │   ├── processed/                # Analysis outputs
 │   │   ├── behavior_summary.csv
 │   │   ├── behavior_raw_data.csv
-│   │   └── eye_metrics_subject_means.csv
+│   │   ├── eye_metrics_subject_means.csv
+│   │   └── rating_results/       # [NEW] Independent rating analysis outputs
 │   ├── stimuli/
 │   │   └── stimulus_config.csv   # Full stimulus configuration
 │   └── README.md                 # Data documentation
@@ -69,6 +75,18 @@ intuitive-physics-eyetracking/
 - **Trials**: 350 trials across 7 blocks (50 trials/block)
 - **Eye tracking**: EyeLink 1000, 1000 Hz monocular sampling
 - **Response**: Mouse click (left/right prediction) + confidence slider (0–100%)
+
+## Supplementary Rating Experiment [NEW]
+
+To examine whether the main SU effect could be attributed to simple changes in heuristic cue availability across SU levels, we conducted an independent binary judgment task with separate participants (N=20).
+
+- **Task**: Judge whether a straight-line trajectory exists in the static board configuration (congruent stimuli only)
+- **Response**: Binary judgment (j = "exists", f = "does not exist")
+- **Trials**: 50 trials per subject (10 per SU level)
+- **Data**: Saved in `data/raw/rating/sub-{ID}/ratings.csv`
+- **Analysis**: `analysis/independent_rating_analysis.R` — runs repeated-measures ANOVA on "yes" judgments by SU level
+
+**Key finding**: The relationship between SU and straight-trajectory judgments is **non-monotonic**, suggesting the main experiment's SU effect cannot be reduced to a simple "higher SU → less available heuristic" explanation.
 
 ### Conditions
 
@@ -120,13 +138,16 @@ python 07_model_fit_compare.py
 python 08_coexist_model_analysis.py
 python 09_coexist_plot_curves.py
 python 10_sosa_blended_model.py
+
+# [NEW] Step 11: Supplementary rating experiment analysis (R)
+Rscript independent_rating_analysis.R
 ```
 
 ### 3. Eye-tracking raw data
 
 Raw eye-tracking files (`.asc`, 28 subjects, ~4.5 GB total) are hosted on the **Open Science Framework (OSF)** due to GitHub file size limits:
 
-> **OSF project**: [https://osf.io/XXXXX/](https://osf.io/XXXXX/)  *(replace with actual link after upload)*
+> **OSF project**: [https://osf.io/cy79h/](https://osf.io/cy79h/)
 
 To reproduce the full eye-tracking analysis pipeline (Steps 3–5):
 1. Download all `.asc` files from the OSF project
@@ -161,8 +182,24 @@ Models are fit with PyMC (NUTS sampler) and compared via WAIC, LOO-CV, AIC, and 
 
 - **Python** >= 3.10
 - **R** >= 4.2
-- **Experiment**: PsychoPy 2023.2.3, pymunk 6.6.0, pylink (SR Research SDK)
+- **Main Experiment**: PsychoPy 2023.2.3, pymunk 6.6.0, pylink (SR Research SDK)
+- **Supplementary Rating Experiment**: PsychoPy 2023.2.3, pandas, numpy
 - **Analysis**: See `requirements.txt` for full list
+
+### [NEW] Independent Rating Task
+
+To run the supplementary rating experiment:
+```bash
+cd experiment/main_task/
+python rating_experiment.py
+```
+
+To analyze the rating data:
+```r
+cd analysis/
+Rscript independent_rating_analysis.R
+```
+Outputs are saved to `data/processed/rating_results/`.
 
 ## License
 
