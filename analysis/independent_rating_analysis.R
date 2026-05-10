@@ -3,17 +3,16 @@ library(ggplot2)
 library(ez)
 library(tidyr)
 
-analysis_dir <- getwd()
-project_root <- normalizePath(file.path(analysis_dir, ".."), winslash = "/", mustWork = TRUE)
-rating_data_candidates <- c(
-  file.path(analysis_dir, "rating_data"),
-  file.path(project_root, "experiment", "正式实验", "rating_data")
+script_dir <- tryCatch(
+  dirname(normalizePath(sys.frame(1)$ofile)),
+  error = function(e) getwd()
 )
-rating_data_root <- rating_data_candidates[file.exists(rating_data_candidates)][1]
-if (is.na(rating_data_root)) {
-  stop("未找到评分数据目录。")
+project_root <- dirname(script_dir)
+rating_data_root <- file.path(project_root, "data", "rating_data")
+if (!dir.exists(rating_data_root)) {
+  stop("未找到评分数据目录: ", rating_data_root)
 }
-output_dir <- file.path(analysis_dir, "rating_results")
+output_dir <- file.path(project_root, "data", "processed")
 if (!dir.exists(output_dir)) {
   dir.create(output_dir, recursive = TRUE)
 }

@@ -345,11 +345,69 @@ assign_rois_for_trial <- function(samples_trial, board_row) {
         ROI_CU     = roi_cu)
 }
 
-# ---------- Single-trial eye metrics ----------
+# ---------- ROI-level trial metrics ----------
+
+count_runs <- function(mask) {
+  if (length(mask) == 0 || all(is.na(mask))) return(NA_real_)
+  mask[is.na(mask)] <- FALSE
+  r <- rle(mask)
+  sum(r$values)
+}
+
+compute_roi_metrics_for_trial <- function(samples_trial) {
+  tid <- unique(samples_trial$trial_id)
+
+  rt_ms <- NA_real_
+  if ("RT" %in% names(samples_trial)) {
+    rt_vals <- unique(samples_trial$RT)
+    rt_vals <- rt_vals[!is.na(rt_vals)]
+    if (length(rt_vals) == 1) rt_ms <- as.numeric(rt_vals)
+  }
+  task_end_ms <- if (!is.na(rt_ms) && rt_ms > 0) TASK_ONSET_MS + rt_ms else Inf
+
+  task_mask <- samples_trial$time_in_trial >= TASK_ONSET_MS &
+    samples_trial$time_in_trial <= task_end_ms &
+    !is.na(samples_trial$x_smooth)
+  task_all_mask <- samples_trial$time_in_trial >= TASK_ONSET_MS &
+    samples_trial$time_in_trial <= task_end_ms
+
+  pt_mask  <- task_mask & (samples_trial$ROI_PT %in% TRUE)
+  cu_mask  <- task_mask & (samples_trial$ROI_CU %in% TRUE)
+  cat_mask <- task_mask & (samples_trial$ROI_static %in% c("catcher_left", "catcher_right"))
+
+  valid_samples      <- sum(task_mask)
+  total_task_samples <- sum(task_all_mask)
+  tl <- if (total_task_samples > 0) 1 - valid_samples / total_task_samples else NA_real_
+
+  if (!is.na(tl) && tl > TASK_MAX_TRACKLOSS_PROP) {
+    return(data.frame(
+      trial_id = tid,
+      Prop_PT = NA_real_, Prop_CU = NA_real_, Prop_catcher = NA_real_,
+      Duration_PT = NA_real_, Duration_CU = NA_real_, Duration_catcher = NA_real_,
+      Fixations_PT = NA_real_, Fixations_CU = NA_real_, Fixations_catcher = NA_real_,
+      CU_visits = NA_real_, PT_entries = NA_real_
+    ))
+  }
+
+  data.frame(
+    trial_id         = tid,
+    Prop_PT          = if (valid_samples > 0) sum(pt_mask)  / valid_samples else NA_real_,
+    Prop_CU          = if (valid_samples > 0) sum(cu_mask)  / valid_samples else NA_real_,
+    Prop_catcher     = if (valid_samples > 0) sum(cat_mask) / valid_samples else NA_real_,
+    Duration_PT      = sum(pt_mask)  * SAMPLE_DT_MS,
+    Duration_CU      = sum(cu_mask)  * SAMPLE_DT_MS,
+    Duration_catcher = sum(cat_mask) * SAMPLE_DT_MS,
+    Fixations_PT     = count_runs(pt_mask),
+    Fixations_CU     = count_runs(cu_mask),
+    Fixations_catcher = count_runs(cat_mask),
+    CU_visits        = count_runs(cu_mask),
+    PT_entries       = count_runs(pt_mask)
+  )
+}
 
 compute_eye_metrics_for_trial <- function(samples_trial, true_traj_df) {
   tid <- unique(samples_trial$trial_id)
-  
+
   rt_ms <- NA_real_
   if ("RT" %in% names(samples_trial)) {
     rt_vals <- unique(samples_trial$RT)
@@ -363,20 +421,20 @@ compute_eye_metrics_for_trial <- function(samples_trial, true_traj_df) {
   } else {
     task_end_ms <- Inf
   }
-  
+
   init_mask <- samples_trial$time_in_trial >= INIT_START_MS &
     samples_trial$time_in_trial <  INIT_END_MS &
     !is.na(samples_trial$x_smooth)
-  
+
   task_mask <- samples_trial$time_in_trial >= TASK_ONSET_MS &
     samples_trial$time_in_trial <= task_end_ms &
     !is.na(samples_trial$x_smooth)
-  
+
   init_all_mask <- samples_trial$time_in_trial >= INIT_START_MS &
     samples_trial$time_in_trial <  INIT_END_MS
   task_all_mask <- samples_trial$time_in_trial >= TASK_ONSET_MS &
     samples_trial$time_in_trial <= task_end_ms
-  
+
   # Init window is fixed at 800ms
   Init_total_time_ms <- INIT_END_MS - INIT_START_MS
   Init_total_samples <- sum(init_all_mask)
@@ -384,10 +442,10 @@ compute_eye_metrics_for_trial <- function(samples_trial, true_traj_df) {
   Init_trackloss_prop <- if (Init_total_samples > 0) {
     1 - Init_valid_samples / Init_total_samples
   } else NA_real_
-  
+
   r_init <- rle(init_mask)
   Init_n_fix <- sum(r_init$values)
-  
+
   dx <- diff(samples_trial$x_smooth)
   dy <- diff(samples_trial$y_smooth)
   pair_mask <- head(init_mask, -1) & tail(init_mask, -1)
@@ -400,13 +458,14 @@ compute_eye_metrics_for_trial <- function(samples_trial, true_traj_df) {
   if (!is.na(Init_mean_sacc_amp) && Init_mean_sacc_amp > MAX_SACCADE_AMPLITUDE_PX) {
     Init_mean_sacc_amp <- NA_real_
   }
-  
+
   non_catcher_mask <- task_mask &
     !(samples_trial$ROI_static %in% c("catcher_left", "catcher_right"))
+
   GS_time_ms <- sum(non_catcher_mask) * SAMPLE_DT_MS
-  
+
   eye_time_ms   <- sum(task_mask) * SAMPLE_DT_MS
-  
+
   inter_time_ms <- sum(task_mask & samples_trial$ROI_PT) * SAMPLE_DT_MS
   if (nrow(true_traj_df) > 1) {
     traj_duration_ms <- (max(true_traj_df$t) - min(true_traj_df$t)) * 1000
@@ -417,30 +476,30 @@ compute_eye_metrics_for_trial <- function(samples_trial, true_traj_df) {
     eye_time_ms + traj_duration_ms - inter_time_ms
   } else NA_real_
   I_over_U <- if (!is.na(union_ms) && union_ms > 0) inter_time_ms / union_ms else NA_real_
-  
+
   track_mask <- task_mask & samples_trial$ROI_PT
   r_track <- rle(track_mask)
   max_run <- if (any(r_track$values)) max(r_track$lengths[r_track$values]) else 0
   Track_ms <- max_run * SAMPLE_DT_MS
-  
+
   Task_total_samples <- sum(task_all_mask)
   Task_valid_samples <- sum(task_mask)
   Task_trackloss_prop <- if (Task_total_samples > 0) {
     1 - Task_valid_samples / Task_total_samples
   } else NA_real_
-  
+
   if (!is.na(Init_trackloss_prop) && Init_trackloss_prop > INIT_MAX_TRACKLOSS_PROP) {
     Init_total_time_ms <- NA_real_
     Init_n_fix <- NA_integer_
     Init_mean_sacc_amp <- NA_real_
   }
-  
+
   if (!is.na(Task_trackloss_prop) && Task_trackloss_prop > TASK_MAX_TRACKLOSS_PROP) {
     GS_time_ms <- NA_real_
     I_over_U <- NA_real_
     Track_ms <- NA_real_
   }
-  
+
   data.frame(
     trial_id            = tid,
     Init_total_time_ms  = Init_total_time_ms,
@@ -454,6 +513,76 @@ compute_eye_metrics_for_trial <- function(samples_trial, true_traj_df) {
   )
 }
 
+prepare_behavior_trials <- function(behav) {
+  if (!("HV_primary" %in% names(behav)) && ("Heuristic_Type" %in% names(behav))) {
+    behav$HV_primary <- behav$Heuristic_Type
+  }
+  if (!("SU_level" %in% names(behav)) && ("SU_Level" %in% names(behav))) {
+    behav$SU_level <- behav$SU_Level
+  }
+  if (!("RT" %in% names(behav)) && all(c("Response_time", "Stim_onset") %in% names(behav))) {
+    behav$RT <- (as.numeric(behav$Response_time) - as.numeric(behav$Stim_onset)) * 1000
+  }
+
+  behav$RT <- suppressWarnings(as.numeric(behav$RT))
+  behav$TrialID <- suppressWarnings(as.integer(behav$TrialID))
+  behav$BlockID <- suppressWarnings(as.integer(behav$BlockID))
+  behav$SU_level <- suppressWarnings(as.integer(behav$SU_level))
+  behav$Correct <- suppressWarnings(as.numeric(behav$Correct))
+  behav$HV_primary <- trimws(as.character(behav$HV_primary))
+
+  response_complete <- rep(TRUE, nrow(behav))
+  if ("Choice" %in% names(behav)) {
+    response_complete <- response_complete & !is.na(behav$Choice) & trimws(as.character(behav$Choice)) != ""
+  }
+  if ("Correct" %in% names(behav)) {
+    response_complete <- response_complete & !is.na(behav$Correct)
+  }
+  if ("RT" %in% names(behav)) {
+    response_complete <- response_complete & !is.na(behav$RT)
+  }
+
+  keep <- response_complete & !is.na(behav$RT) & behav$RT >= 200
+  behav <- behav[keep, , drop = FALSE]
+  if (nrow(behav) == 0) {
+    return(behav)
+  }
+
+  rt_mean <- mean(behav$RT, na.rm = TRUE)
+  rt_sd <- stats::sd(behav$RT, na.rm = TRUE)
+  if (!is.na(rt_sd) && rt_sd > 0) {
+    behav <- behav[behav$RT <= (rt_mean + 3 * rt_sd), , drop = FALSE]
+  }
+  if (nrow(behav) == 0) {
+    return(behav)
+  }
+
+  split_key <- interaction(behav$HV_primary, behav$SU_level, drop = TRUE, lex.order = TRUE)
+  groups <- split(behav, split_key)
+  trimmed <- lapply(groups, function(grp) {
+    hv <- tolower(trimws(as.character(grp$HV_primary[1])))
+    su <- suppressWarnings(as.integer(grp$SU_level[1]))
+    target_n <- NA_integer_
+    if (hv == "conflict") {
+      target_n <- 100L
+    } else if (hv %in% c("congruent", "ambiguous") && !is.na(su) && su %in% 1:5) {
+      target_n <- 25L
+    }
+    grp <- grp[order(grp$TrialID, grp$BlockID, na.last = TRUE), , drop = FALSE]
+    if (is.na(target_n) || nrow(grp) <= target_n) {
+      return(grp)
+    }
+    idx <- unique(round(seq(1, nrow(grp), length.out = target_n)))
+    while (length(idx) < target_n) {
+      idx <- unique(c(idx, max(idx) + 1L))
+      idx <- idx[idx <= nrow(grp)]
+    }
+    grp[idx[seq_len(target_n)], , drop = FALSE]
+  })
+
+  dplyr::bind_rows(trimmed)
+}
+
 # ---------- Main function: single-subject gaze analysis ----------
 
 run_gaze_analysis_for_subject <- function(
@@ -463,28 +592,29 @@ run_gaze_analysis_for_subject <- function(
 ) {
   asc <- read_asc_raw(asc_path)
   trial_bounds <- get_trial_bounds(asc$msg)
-  
+
   samples_gaze <- preprocess_gaze(asc$samples, asc$eblink, trial_bounds)
-  
+
   # Merge behavioral data if provided; drop conflict trials; keep RT for task window
   if (!is.null(behav_csv_path) && file.exists(behav_csv_path)) {
     behav <- read.csv(behav_csv_path, stringsAsFactors = FALSE)
+    behav <- prepare_behavior_trials(behav)
     behav_small <- behav %>%
       dplyr::select(TrialID, BlockID, BoardID,
                     SU_level, HV_primary, HV_secondary_count,
                     HV_secondary_collision, PhysOutcome, RT)
-    
+
     samples_joined <- samples_gaze %>%
       left_join(behav_small, by = c("trial_id" = "TrialID")) %>%
       mutate(HV_primary = trimws(HV_primary)) %>%
-      dplyr::filter(HV_primary != "conflict")
+      dplyr::filter(!is.na(BoardID), HV_primary != "conflict")
   } else {
     samples_joined <- samples_gaze
     samples_joined$BoardID <- NA_character_
   }
-  
+
   stim_cfg <- load_stim_config(stim_config_path)
-  
+
   # Assign ROIs for all trials
   split_trials <- split(samples_joined, samples_joined$trial_id)
   roi_list <- lapply(split_trials, function(df_trial) {
@@ -497,7 +627,7 @@ run_gaze_analysis_for_subject <- function(
   })
   samples_with_roi <- do.call(rbind, roi_list)
   rownames(samples_with_roi) <- NULL
-  
+
   # Compute trial-level eye metrics
   split_roi_trials <- split(samples_with_roi, samples_with_roi$trial_id)
   eye_list <- lapply(split_roi_trials, function(df_trial) {
@@ -508,7 +638,14 @@ run_gaze_analysis_for_subject <- function(
   })
   eye_metrics <- do.call(rbind, eye_list)
   rownames(eye_metrics) <- NULL
-  
+
+  # Compute ROI metrics and join
+  roi_list <- lapply(split_roi_trials, compute_roi_metrics_for_trial)
+  roi_metrics <- do.call(rbind, roi_list)
+  rownames(roi_metrics) <- NULL
+  eye_metrics <- eye_metrics %>%
+    left_join(roi_metrics, by = "trial_id")
+
   # Merge behavioral data to eye metrics
   if (!is.null(behav_csv_path) && file.exists(behav_csv_path)) {
     result <- eye_metrics %>%
@@ -516,7 +653,7 @@ run_gaze_analysis_for_subject <- function(
   } else {
     result <- eye_metrics
   }
-  
+
   list(
     trial_eye_metrics = result,
     samples_with_roi  = samples_with_roi
@@ -528,60 +665,60 @@ run_gaze_analysis_for_subject <- function(
 # ============================================================
 
 if (interactive() || !exists("SKIP_AUTO_RUN")) {
-  
+
   cat("\n", strrep("=", 60), "\n", sep = "")
   cat("Starting batch eye-tracking analysis for all subjects...\n")
   cat(strrep("=", 60), "\n\n")
-  
+
   # ---------- 1. Path configuration ----------
-  
+
   script_dir <- tryCatch(
     dirname(normalizePath(sys.frame(1)$ofile)),
     error = function(e) getwd()
   )
   project_root <- dirname(script_dir)
-  
+
   eye_dir    <- file.path(project_root, "data", "raw", "eye_tracking")
   behav_dir  <- file.path(project_root, "data", "raw", "behavior")
   stim_file  <- file.path(project_root, "data", "stimuli", "stimulus_config.csv")
   output_dir <- file.path(project_root, "data", "processed")
-  
+
   dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
-  
+
   cat("Project root:", project_root, "\n")
   cat("Eye data dir:", eye_dir, "\n")
   cat("Behavior dir:", behav_dir, "\n")
   cat("Stimulus config:", stim_file, "\n")
   cat("Config exists:", file.exists(stim_file), "\n")
-  
+
   if (!file.exists(stim_file)) {
     stop("Cannot find stimulus_config.csv: ", stim_file)
   }
-  
+
   # Get all X-prefixed .asc files in eye_tracking folder
   asc_files <- list.files(eye_dir, pattern = "^X[0-9]+\\.asc$", full.names = FALSE)
   if (length(asc_files) == 0) {
     stop("No X-prefixed .asc files found in eye_tracking folder")
   }
-  
+
   # Extract subject numbers (X01.asc -> 01)
   subject_nums <- gsub("^X([0-9]+)\\.asc$", "\\1", asc_files)
   subjects <- paste0("X", subject_nums)
-  
+
   # Corresponding behavioral files (strip leading zeros: 01 -> 1.csv)
   behav_files <- paste0(as.integer(subject_nums), ".csv")
-  
+
   all_eye_metrics   <- list()
   all_samples_gaze  <- list()
-  
+
   for (i in seq_along(subjects)) {
     subj <- subjects[i]
     asc_file   <- file.path(eye_dir, paste0(subj, ".asc"))
     behav_file <- file.path(behav_dir, behav_files[i])
-    
+
     cat("\n----------\n")
     cat("Subject:", subj, "\n")
-    
+
     if (!file.exists(asc_file)) {
       cat("  Skipping: ASC file not found:", asc_file, "\n")
       next
@@ -590,51 +727,80 @@ if (interactive() || !exists("SKIP_AUTO_RUN")) {
       cat("  Skipping: Behavioral file not found:", behav_file, "\n")
       next
     }
-    
+
     cat("  ASC file:", asc_file, "\n")
     cat("  Behavioral file:", behav_file, "\n")
     cat("  Processing...\n")
-    
+
     tryCatch({
       res <- run_gaze_analysis_for_subject(
         asc_path = asc_file,
         behav_csv_path = behav_file,
         stim_config_path = stim_file
       )
-      
+
       res$trial_eye_metrics$subject_id <- subj
       res$samples_with_roi$subject_id  <- subj
-      
+
       all_eye_metrics[[subj]]  <- res$trial_eye_metrics
       all_samples_gaze[[subj]] <- res$samples_with_roi
-      
+
       cat("  Done, subject", subj, ":", nrow(res$trial_eye_metrics), "trials\n")
     }, error = function(e) {
       cat("  Error: subject", subj, "failed -", e$message, "\n")
     })
   }
-  
+
   if (length(all_eye_metrics) == 0) {
     stop("No subjects were successfully analyzed. Please check paths.")
   }
-  
+
   # Combine and save trial-level metrics
   eye_metrics_all <- do.call(rbind, all_eye_metrics)
   rownames(eye_metrics_all) <- NULL
   metrics_file <- file.path(output_dir, "eye_metrics_all_subjects.csv")
   write.csv(eye_metrics_all, metrics_file, row.names = FALSE, fileEncoding = "UTF-8")
   cat("\nSaved:", metrics_file, "\n")
-  
+
+  # Aggregate to subject x HV x SU means
+  eye_metrics_subject_means <- eye_metrics_all %>%
+    mutate(
+      HV_primary = trimws(HV_primary),
+      SU_level   = as.integer(SU_level)
+    ) %>%
+    filter(HV_primary %in% c("congruent", "ambiguous"), !is.na(SU_level)) %>%
+    group_by(subject_id, HV_primary, SU_level) %>%
+    summarise(
+      n_trials          = n(),
+      I_over_U          = mean(I_over_U, na.rm = TRUE),
+      Prop_PT           = mean(Prop_PT, na.rm = TRUE),
+      Prop_CU           = mean(Prop_CU, na.rm = TRUE),
+      Prop_catcher      = mean(Prop_catcher, na.rm = TRUE),
+      Duration_PT       = mean(Duration_PT, na.rm = TRUE),
+      Duration_CU       = mean(Duration_CU, na.rm = TRUE),
+      Duration_catcher  = mean(Duration_catcher, na.rm = TRUE),
+      Fixations_PT      = mean(Fixations_PT, na.rm = TRUE),
+      Fixations_CU      = mean(Fixations_CU, na.rm = TRUE),
+      Fixations_catcher = mean(Fixations_catcher, na.rm = TRUE),
+      Track_ms          = mean(Track_ms, na.rm = TRUE),
+      CU_visits         = mean(CU_visits, na.rm = TRUE),
+      PT_entries        = mean(PT_entries, na.rm = TRUE),
+      .groups = "drop"
+    )
+  subject_means_file <- file.path(output_dir, "eye_metrics_subject_means.csv")
+  write.csv(eye_metrics_subject_means, subject_means_file, row.names = FALSE, fileEncoding = "UTF-8")
+  cat("Saved:", subject_means_file, "\n")
+
   # Combine sample-level data and save as RData
   samples_gaze_all <- do.call(rbind, all_samples_gaze)
   rownames(samples_gaze_all) <- NULL
   rdata_file <- file.path(output_dir, "gaze_analysis_all_subjects.RData")
   save(eye_metrics_all, samples_gaze_all, file = rdata_file)
   cat("Saved:", rdata_file, "\n\n")
-  
+
   cat("Eye metrics summary (all subjects combined):\n")
   print(summary(eye_metrics_all[, c("Init_total_time_ms", "GS_time_ms", "I_over_U", "Track_ms")]))
-  
+
   cat("\n", strrep("=", 60), "\n", sep = "")
   cat("Batch eye-tracking analysis complete! Results saved to:", output_dir, "\n")
   cat(strrep("=", 60), "\n")

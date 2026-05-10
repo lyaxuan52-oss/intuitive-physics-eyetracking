@@ -18,7 +18,7 @@ This repository contains the experiment program, analysis code, and behavioral d
 ```
 intuitive-physics-eyetracking/
 ├── README.md
-├── requirements.txt              # Python + R dependency list
+├── requirements.txt              # Python analysis dependencies + R package notes
 ├── .gitignore
 │
 ├── experiment/
@@ -29,7 +29,7 @@ intuitive-physics-eyetracking/
 │   │   ├── rating_experiment.py  # [NEW] Independent rating experiment (binary judgment task)
 │   │   ├── physics_utils.py      # Pymunk physics engine utilities
 │   │   ├── EyeLinkCoreGraphicsPsychoPy.py  # EyeLink integration
-│   │   └── requirements.txt      # Experiment-specific dependencies
+│   │   └── requirements.txt      # Experiment / stimulus-generation dependencies
 │   └── practice/                 # Practice/training task
 │       ├── config.py
 │       ├── physics_utils.py
@@ -39,7 +39,7 @@ intuitive-physics-eyetracking/
 ├── analysis/                     # All analysis scripts (numbered by execution order)
 │   ├── 01_preprocess_behavior.py           # Behavioral data preprocessing
 │   ├── 02_behavior_inferential_stats.R     # Behavioral ANOVA & post-hoc tests
-│   ├── 03_gaze_pipeline.R                  # Eye-tracking preprocessing pipeline
+│   ├── 03_gaze_pipeline.R                  # Eye-tracking gaze pipeline (R) — requires raw ASC files
 │   ├── 04_H2_eye_analysis.R               # H2: ROI & trajectory overlap analysis
 │   ├── 05_H3_eye_analysis.R               # H3: CU region & strategy switching
 │   ├── 06_eye_metrics_visualization.py     # Publication-quality figures
@@ -52,15 +52,18 @@ intuitive-physics-eyetracking/
 ├── data/
 │   ├── raw/
 │   │   ├── behavior/             # Per-subject behavioral CSVs (N=44)
-│   │   ├── eye_tracking/         # Raw EDF/ASC files (not in repo; see below)
-│   │   └── rating/               # [NEW] Independent rating experiment data (N=20)
-│   │       └── sub-{ID}/
-│   │           └── ratings.csv   # Binary judgment data
+│   │   └── eye_tracking/         # Raw ASC files; gitignored and may be absent in a fresh clone
 │   ├── processed/                # Analysis outputs
 │   │   ├── behavior_summary.csv
 │   │   ├── behavior_raw_data.csv
+│   │   ├── eye_metrics_all_subjects.csv
 │   │   ├── eye_metrics_subject_means.csv
-│   │   └── rating_results/       # [NEW] Independent rating analysis outputs
+│   │   ├── gaze_analysis_all_subjects.RData
+│   │   ├── judgment_*.csv        # [NEW] Independent rating analysis outputs
+│   │   └── model_comparison_waic_loo.csv
+│   ├── rating_data/              # [NEW] Independent rating experiment data (N=20)
+│   │   └── sub-{ID}/
+│   │       └── ratings.csv       # Binary judgment data
 │   ├── stimuli/
 │   │   └── stimulus_config.csv   # Full stimulus configuration
 │   └── README.md                 # Data documentation
@@ -83,7 +86,7 @@ To examine whether the main SU effect could be attributed to simple changes in h
 - **Task**: Judge whether a straight-line trajectory exists in the static board configuration (congruent stimuli only)
 - **Response**: Binary judgment (j = "exists", f = "does not exist")
 - **Trials**: 50 trials per subject (10 per SU level)
-- **Data**: Saved in `data/raw/rating/sub-{ID}/ratings.csv`
+- **Data**: Saved in `data/rating_data/sub-{ID}/ratings.csv`
 - **Analysis**: `analysis/independent_rating_analysis.R` — runs repeated-measures ANOVA on "yes" judgments by SU level
 
 **Key finding**: The relationship between SU and straight-trajectory judgments is **non-monotonic**, suggesting the main experiment's SU effect cannot be reduced to a simple "higher SU → less available heuristic" explanation.
@@ -104,11 +107,18 @@ To examine whether the main SU effect could be attributed to simple changes in h
 pip install -r requirements.txt
 ```
 
-**R** (for analysis scripts 02–05):
+**R** (for analysis scripts 02–05 and `independent_rating_analysis.R`):
 ```r
 install.packages(c("dplyr", "tidyr", "purrr", "ggplot2",
                     "ez", "emmeans", "jsonlite", "zoo"))
 ```
+
+**Experiment / stimulus generation** (optional; needed to run `stimulus_generator.py`, `experiment_runtime.py`, or `rating_experiment.py`):
+```bash
+pip install -r experiment/main_task/requirements.txt
+```
+
+`pylink` must be installed from the SR Research EyeLink SDK rather than from the public Python package index.
 
 ### 2. Run the analysis pipeline
 
@@ -124,6 +134,8 @@ python 01_preprocess_behavior.py
 Rscript 02_behavior_inferential_stats.R
 
 # Step 3: Eye-tracking gaze pipeline (R) — requires raw ASC files
+# Outputs: eye_metrics_all_subjects.csv, eye_metrics_subject_means.csv,
+#          gaze_analysis_all_subjects.RData
 Rscript 03_gaze_pipeline.R
 
 # Step 4-5: Eye-tracking statistical analyses (R)
@@ -145,15 +157,18 @@ Rscript independent_rating_analysis.R
 
 ### 3. Eye-tracking raw data
 
-Raw eye-tracking files (`.asc`, 28 subjects, ~4.5 GB total) are hosted on the **Open Science Framework (OSF)** due to GitHub file size limits:
+Raw eye-tracking `.asc` files are **gitignored** because of their size, so `data/raw/eye_tracking/` may be empty in a fresh clone even if a local working copy contains the files.
 
 > **OSF project**: [https://osf.io/cy79h/](https://osf.io/cy79h/)
 
 To reproduce the full eye-tracking analysis pipeline (Steps 3–5):
-1. Download all `.asc` files from the OSF project
+1. Download the `.asc` files from the OSF project if they are absent locally
 2. Place them in `data/raw/eye_tracking/` with the naming convention `X{nn}.asc` (e.g., `X01.asc`)
+3. Run `Rscript analysis/03_gaze_pipeline.R` to regenerate trial-level eye metrics, subject-level summaries, and the combined `.RData` workspace used for inspection
 
-**Steps 1–2 and 6–10 can run without these files** using the processed data already included in this repository.
+The current project layout contains behavioral data for 44 participants and eye-tracking files for 43 participants (`X38.asc` is absent while `data/raw/behavior/38.csv` is present), so eye-tracking analyses use one fewer subject than behavioral analyses by design.
+
+**Steps 1–2 and 6–10 can run without reprocessing the raw eye-tracking files** by using the processed data already included in this repository.
 
 ## Computational Models
 
@@ -172,19 +187,20 @@ Models are fit with PyMC (NUTS sampler) and compared via WAIC, LOO-CV, AIC, and 
 
 | Metric | Description |
 |--------|-------------|
-| **I/U (Trajectory Overlap)** | Intersection-over-union of gaze path and true trajectory |
+| **I_over_U (Trajectory Overlap)** | Intersection-over-union of gaze path and true trajectory |
 | **Track_ms** | Longest continuous gaze run along the predicted trajectory |
 | **Prop_PT / Duration_PT** | Gaze proportion and duration in the predicted trajectory ROI |
 | **Prop_CU / Duration_CU** | Gaze proportion and duration in the critical uncertainty ROI |
 | **Fixations_PT / Fixations_CU** | Fixation counts in PT and CU ROIs |
+| **PT_entries / CU_visits** | Compatibility aliases retained for downstream scripts; currently computed with the same run-count logic as `Fixations_PT` / `Fixations_CU` |
 
 ## Software Requirements
 
 - **Python** >= 3.10
 - **R** >= 4.2
-- **Main Experiment**: PsychoPy 2023.2.3, pymunk 6.6.0, pylink (SR Research SDK)
+- **Main Experiment / Stimulus Generation**: PsychoPy 2023.2.3, pymunk 6.6.0, tqdm, pylink (SR Research SDK)
 - **Supplementary Rating Experiment**: PsychoPy 2023.2.3, pandas, numpy
-- **Analysis**: See `requirements.txt` for full list
+- **Analysis**: Install Python packages from `requirements.txt`; install the R packages listed in the Quick Start section
 
 ### [NEW] Independent Rating Task
 
@@ -199,7 +215,7 @@ To analyze the rating data:
 cd analysis/
 Rscript independent_rating_analysis.R
 ```
-Outputs are saved to `data/processed/rating_results/`.
+Outputs are saved to `data/processed/` as `judgment_*.csv` summary files.
 
 ## License
 

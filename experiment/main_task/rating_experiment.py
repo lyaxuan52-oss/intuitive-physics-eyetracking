@@ -10,7 +10,8 @@ from psychopy import visual, core, event
 import config
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-OUTPUT_ROOT = SCRIPT_DIR / 'rating_data'
+PROJECT_ROOT = SCRIPT_DIR.parent.parent
+OUTPUT_ROOT = PROJECT_ROOT / 'data' / 'rating_data'
 FULLSCREEN = True
 DEBUG_WINDOW_SIZE = (1440, 900)
 TRIALS_PER_SU = 10

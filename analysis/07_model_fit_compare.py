@@ -21,13 +21,13 @@ Usage:
 """
 
 import json
+import os
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pymc as pm
 import arviz as az
-import xarray as xr
 
 # ---------------------------------------------------------------------------
 # Path configuration
@@ -129,8 +129,7 @@ def _prepare_arrays_with_gate(df: pd.DataFrame):
 # Model 1: Coexist (heuristic + simulation, continuous weighting)
 # ---------------------------------------------------------------------------
 
-def fit_coexist_model(df, draws=2000, tune=2000, chains=4,
-                      target_accept=0.9, random_seed=123):
+def build_coexist_model(df):
     subj_codes, subj_idx, HV, SU, SU_z, y = _prepare_arrays(df)
     n_subj = len(subj_codes)
 
@@ -162,6 +161,15 @@ def fit_coexist_model(df, draws=2000, tune=2000, chains=4,
         p = pm.Deterministic("p", wH * p_heur + wS * p_sim)
         pm.Bernoulli("y_obs", p=p, observed=y)
 
+    return model
+
+
+def fit_coexist_model(df, draws=2000, tune=2000, chains=4,
+                      target_accept=0.9, random_seed=123):
+    model = build_coexist_model(df)
+
+    with model:
+
         idata = pm.sample(draws=draws, tune=tune, chains=chains,
                           target_accept=target_accept, random_seed=random_seed,
                           idata_kwargs={"log_likelihood": True})
@@ -174,8 +182,7 @@ def fit_coexist_model(df, draws=2000, tune=2000, chains=4,
 # Model 2: Pure Heuristic
 # ---------------------------------------------------------------------------
 
-def fit_pure_heuristic_model(df, draws=2000, tune=2000, chains=4,
-                              target_accept=0.9, random_seed=123):
+def build_pure_heuristic_model(df):
     subj_codes, subj_idx, HV, _SU, _SU_z, y = _prepare_arrays(df)
     n_subj = len(subj_codes)
 
@@ -189,6 +196,15 @@ def fit_pure_heuristic_model(df, draws=2000, tune=2000, chains=4,
         p = pm.Deterministic("p", pm.math.sigmoid(logit_p))
         pm.Bernoulli("y_obs", p=p, observed=y)
 
+    return model
+
+
+def fit_pure_heuristic_model(df, draws=2000, tune=2000, chains=4,
+                              target_accept=0.9, random_seed=123):
+    model = build_pure_heuristic_model(df)
+
+    with model:
+
         idata = pm.sample(draws=draws, tune=tune, chains=chains,
                           target_accept=target_accept, random_seed=random_seed,
                           idata_kwargs={"log_likelihood": True})
@@ -201,8 +217,7 @@ def fit_pure_heuristic_model(df, draws=2000, tune=2000, chains=4,
 # Model 3: Pure Simulation
 # ---------------------------------------------------------------------------
 
-def fit_pure_simulation_model(df, draws=2000, tune=2000, chains=4,
-                               target_accept=0.9, random_seed=123):
+def build_pure_simulation_model(df):
     subj_codes, subj_idx, _HV, _SU, SU_z, y = _prepare_arrays(df)
     n_subj = len(subj_codes)
 
@@ -216,6 +231,15 @@ def fit_pure_simulation_model(df, draws=2000, tune=2000, chains=4,
         p = pm.Deterministic("p", pm.math.sigmoid(logit_p))
         pm.Bernoulli("y_obs", p=p, observed=y)
 
+    return model
+
+
+def fit_pure_simulation_model(df, draws=2000, tune=2000, chains=4,
+                               target_accept=0.9, random_seed=123):
+    model = build_pure_simulation_model(df)
+
+    with model:
+
         idata = pm.sample(draws=draws, tune=tune, chains=chains,
                           target_accept=target_accept, random_seed=random_seed,
                           idata_kwargs={"log_likelihood": True})
@@ -228,8 +252,7 @@ def fit_pure_simulation_model(df, draws=2000, tune=2000, chains=4,
 # Model 4: Sosa Switch (trajectory-based gate)
 # ---------------------------------------------------------------------------
 
-def fit_sosa_switch_model(df, draws=2000, tune=2000, chains=4,
-                           target_accept=0.9, random_seed=123):
+def build_sosa_switch_model(df):
     subj_codes, subj_idx, _HV, _SU, _SU_z, y, gate = _prepare_arrays_with_gate(df)
     n_subj = len(subj_codes)
 
@@ -249,12 +272,41 @@ def fit_sosa_switch_model(df, draws=2000, tune=2000, chains=4,
         p = pm.Deterministic("p", (1.0 - gate_data) * p_sim + gate_data * p_heur)
         pm.Bernoulli("y_obs", p=p, observed=y)
 
+    return model
+
+
+def fit_sosa_switch_model(df, draws=2000, tune=2000, chains=4,
+                           target_accept=0.9, random_seed=123):
+    model = build_sosa_switch_model(df)
+
+    with model:
+
         idata = pm.sample(draws=draws, tune=tune, chains=chains,
                           target_accept=target_accept, random_seed=random_seed,
                           idata_kwargs={"log_likelihood": True})
 
     az.to_netcdf(idata, str(_BASE_DIR / "idata_sosa_blended.nc"))
     return model, idata
+
+
+def _count_free_parameters(model) -> int:
+    point = model.initial_point()
+    return int(sum(np.asarray(value).size for value in point.values()))
+
+
+def _extract_total_loglik_draws(idata) -> np.ndarray:
+    if hasattr(idata, "log_likelihood") and "y_obs" in idata.log_likelihood:
+        log_lik = idata.log_likelihood["y_obs"].values
+    else:
+        obs = idata.observed_data["y_obs"].values.astype(int).ravel()
+        p_samples = idata.posterior["p"].values
+        y_broadcast = obs[None, None, :]
+        log_lik = np.where(
+            y_broadcast == 1,
+            np.log(p_samples + 1e-12),
+            np.log(1.0 - p_samples + 1e-12),
+        )
+    return log_lik.sum(axis=-1)
 
 
 # ---------------------------------------------------------------------------
@@ -266,9 +318,20 @@ def main():
     print(df.head())
 
     idatas = {}
+    model_builders = {
+        "coexist": build_coexist_model,
+        "pure_heuristic": build_pure_heuristic_model,
+        "pure_simulation": build_pure_simulation_model,
+        "sosa_blended": build_sosa_switch_model,
+    }
     n_obs = len(df)
 
-    sample_kwargs = dict(draws=800, tune=800, chains=2, target_accept=0.9)
+    sample_kwargs = dict(
+        draws=int(os.getenv("MODEL_COMPARE_DRAWS", "800")),
+        tune=int(os.getenv("MODEL_COMPARE_TUNE", "800")),
+        chains=int(os.getenv("MODEL_COMPARE_CHAINS", "2")),
+        target_accept=float(os.getenv("MODEL_COMPARE_TARGET_ACCEPT", "0.9")),
+    )
 
     def _load_or_fit(name, fit_func, nc_filename):
         nc_path = _BASE_DIR / nc_filename
@@ -294,13 +357,17 @@ def main():
     results = []
     for name, idata in idatas.items():
         obs = idata.observed_data["y_obs"].values.astype(int).ravel()
-        p_samples = idata.posterior["p"].values
-        y_broadcast = obs[None, None, :]
-        log_lik = np.where(
-            y_broadcast == 1,
-            np.log(p_samples + 1e-12),
-            np.log(1.0 - p_samples + 1e-12),
-        )
+        total_loglik_draws = _extract_total_loglik_draws(idata)
+        if hasattr(idata, "log_likelihood") and "y_obs" in idata.log_likelihood:
+            log_lik = idata.log_likelihood["y_obs"].values
+        else:
+            p_samples = idata.posterior["p"].values
+            y_broadcast = obs[None, None, :]
+            log_lik = np.where(
+                y_broadcast == 1,
+                np.log(p_samples + 1e-12),
+                np.log(1.0 - p_samples + 1e-12),
+            )
 
         idata_ll = az.from_dict(log_likelihood={"y_obs": log_lik})
         waic_res = az.waic(idata_ll)
@@ -314,19 +381,24 @@ def main():
         p_loo_val = float(loo_res.p_loo)
         loo_ic = -2.0 * elpd_loo
 
-        lppd = elpd_waic + p_waic_val
-        k_eff = p_waic_val
-        aic = -2.0 * lppd + 2.0 * k_eff
-        bic = -2.0 * lppd + k_eff * np.log(n_obs)
+        model = model_builders[name](df)
+        k_params = _count_free_parameters(model)
+        max_loglik = float(np.max(total_loglik_draws))
+        aic = 2.0 * k_params - 2.0 * max_loglik
+        bic = k_params * np.log(n_obs) - 2.0 * max_loglik
 
         p_mean = idata.posterior["p"].mean(dim=("chain", "draw")).values.astype(float).ravel()
         mse = float(np.mean((obs.astype(float) - p_mean) ** 2))
 
-        print(f"Model {name}: WAIC={waic_val:.2f}, LOO={loo_ic:.2f}, MSE={mse:.4f}")
+        print(
+            f"Model {name}: WAIC={waic_val:.2f}, LOO={loo_ic:.2f}, MSE={mse:.4f}, "
+            f"k={k_params}, max_loglik={max_loglik:.2f}, AIC={aic:.2f}, BIC={bic:.2f}"
+        )
 
         results.append({
             "model": name, "waic": waic_val, "p_waic": p_waic_val,
             "loo": loo_ic, "p_loo": p_loo_val, "mse": mse,
+            "k_params": int(k_params), "max_loglik": float(max_loglik),
             "aic": float(aic), "bic": float(bic),
         })
 

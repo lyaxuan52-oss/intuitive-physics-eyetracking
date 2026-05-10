@@ -20,15 +20,13 @@ arviz>=0.15
 # ============================================================
 # install.packages(c(
 #   "dplyr", "tidyr", "purrr", "ggplot2",
-#   "ez", "emmeans", "jsonlite", "zoo",
-#   "gridExtra", "gtable",
-#   # NEW: Independent rating analysis dependencies
-#   "dplyr", "ggplot2", "ez", "tidyr"
+#   "ez", "emmeans", "jsonlite", "zoo"
 # ))
-#
+
 # ============================================================
 # Experiment dependencies (see experiment/main_task/requirements.txt)
 # ============================================================
 # pymunk==6.6.0
 # psychopy==2023.2.3
-# pylink  (SR Research EyeLink SDK, not standard pip)
+# tqdm>=4.65
+# pylink  (install from the SR Research EyeLink SDK, not from PyPI)
